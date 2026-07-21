@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<title>LIVE — capture-only camera</title>
+<style>
+  :root{
+    --bg:#0a0a0b; --fg:#fafafa; --dim:#8a8a90; --line:#232327;
+    --accent:#ff3b5c; --ok:#37d67a; --card:#131316;
+    --shutter:#ffffff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overscroll-behavior:none; touch-action:manipulation;}
+  body{overflow:hidden;}
+  /* re-enable text interaction only where it's wanted */
+  input,textarea{-webkit-user-select:text; user-select:text; -webkit-touch-callout:default;}
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;}
+
+  /* ---------- top bar ---------- */
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:30;
+    padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;
+    display:flex;align-items:center;justify-content:space-between;
+    background:linear-gradient(#000a,transparent);}
+  .brand{font-weight:800;letter-spacing:.14em;font-size:15px;display:flex;align-items:center;gap:7px;}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite;}
+  @keyframes pulse{50%{opacity:.35}}
+  .iconbtn{width:42px;height:42px;border-radius:50%;border:none;color:#fff;
+    background:#ffffff1a;backdrop-filter:blur(8px);display:grid;place-items:center;
+    font-size:18px;cursor:pointer;}
+  .iconbtn:active{transform:scale(.92);}
+
+  /* ---------- camera ---------- */
+  #camera{position:absolute;inset:0;background:#000;}
+  #video{width:100%;height:100%;object-fit:cover;background:#000;}
+  #video.mirror{transform:scaleX(-1);}
+  .pip{position:absolute;top:calc(env(safe-area-inset-top) + 74px);right:16px;
+    width:104px;height:150px;border-radius:16px;overflow:hidden;z-index:22;display:none;
+    border:2px solid #ffffff88;box-shadow:0 6px 20px #000a;background:#000;}
+  .pip.show{display:block;}
+  #videoPip{width:100%;height:100%;object-fit:cover;}
+  #videoPip.mirror{transform:scaleX(-1);}
+  #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:40;}
+  .permwarn{position:absolute;inset:0;display:none;flex-direction:column;gap:14px;
+    align-items:center;justify-content:center;text-align:center;padding:32px;z-index:20;}
+  .permwarn h2{margin:0;font-size:18px}
+  .permwarn p{margin:0;color:var(--dim);font-size:14px;line-height:1.5;max-width:300px}
+
+  /* segment progress */
+  .segbar{position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:16px;right:16px;
+    height:4px;border-radius:4px;background:#ffffff22;display:none;overflow:hidden;z-index:25;gap:2px;}
+  .segbar.show{display:flex;}
+  .seg{height:100%;background:var(--accent);border-radius:4px;}
+  .seg.live{background:#fff;}
+
+  /* ---------- bottom controls ---------- */
+  .controls{position:absolute;left:0;right:0;bottom:0;z-index:30;
+    padding:20px 0 calc(env(safe-area-inset-bottom) + 22px);
+    background:linear-gradient(transparent,#000c 55%);
+    display:flex;flex-direction:column;align-items:center;gap:16px;}
+  .modes{display:flex;gap:22px;font-size:13px;font-weight:700;letter-spacing:.12em;color:var(--dim);}
+  .modes span{cursor:pointer;padding:4px 2px;transition:color .15s;}
+  .modes span.active{color:#fff;}
+  .row{display:flex;align-items:center;justify-content:space-between;width:100%;
+    max-width:420px;padding:0 34px;}
+  .shutter{width:78px;height:78px;border-radius:50%;background:transparent;
+    border:5px solid #fff;display:grid;place-items:center;cursor:pointer;flex:0 0 auto;
+    touch-action:none;}
+  .shutter .core{width:60px;height:60px;border-radius:50%;background:var(--shutter);
+    transition:all .18s cubic-bezier(.3,1.4,.5,1);}
+  .shutter.video .core{background:var(--accent);}
+  .shutter.recording{border-color:var(--accent);}
+  .shutter.recording .core{border-radius:9px;width:32px;height:32px;}
+  .side{width:52px;height:52px;display:grid;place-items:center;flex:0 0 auto;}
+  .thumbbtn{width:46px;height:46px;border-radius:12px;background:#ffffff14;border:1.5px solid #ffffff33;
+    overflow:hidden;cursor:pointer;display:grid;place-items:center;font-size:11px;color:var(--dim);}
+  .thumbbtn img,.thumbbtn video{width:100%;height:100%;object-fit:cover;}
+  .hint{color:var(--dim);font-size:12px;height:14px;text-align:center;}
+  .donebtn{background:var(--ok);color:#04210f;border:none;font-weight:800;font-size:14px;
+    padding:10px 16px;border-radius:22px;cursor:pointer;display:none;}
+  .donebtn.show{display:block;}
+
+  /* ---------- review overlay ---------- */
+  .review{position:absolute;inset:0;z-index:60;background:#000;display:none;flex-direction:column;}
+  .review.show{display:flex;}
+  .review .media{flex:1;position:relative;background:#000;overflow:hidden;}
+  .review .media img,.review .media video{width:100%;height:100%;object-fit:contain;}
+  .receipt{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;
+    background:#0c0c0ecc;backdrop-filter:blur(10px);border:1px solid var(--line);
+    border-radius:12px;padding:10px 12px;font-size:11px;color:var(--dim);line-height:1.5;}
+  .receipt b{color:var(--ok);}
+  .receipt .mono{font-family:ui-monospace,Menlo,monospace;color:#c9c9cf;word-break:break-all;}
+  .review .foot{padding:14px 16px calc(env(safe-area-inset-bottom) + 16px);
+    background:#0a0a0b;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:12px;}
+  .capinput{width:100%;background:#111114;border:1px solid var(--line);color:#fff;
+    border-radius:12px;padding:12px 14px;font-size:15px;resize:none;font-family:inherit;}
+  .capinput::placeholder{color:#5a5a60;}
+  .audience{display:flex;gap:8px;}
+  .aud{flex:1;background:#111114;border:1px solid var(--line);color:var(--dim);
+    border-radius:12px;padding:9px 6px;cursor:pointer;text-align:center;display:flex;
+    flex-direction:column;align-items:center;gap:3px;transition:all .15s;}
+  .aud .ic{font-size:16px;}
+  .aud .lb{font-size:11px;font-weight:700;letter-spacing:.02em;}
+  .aud.sel{border-color:var(--accent);color:#fff;background:#ff3b5c1a;}
+  .revbtns{display:flex;gap:10px;}
+  .btn{flex:1;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;}
+  .btn.ghost{background:#1a1a1e;color:#cfcfd4;}
+  .btn.draft{background:#1a1a1e;color:#cfcfd4;flex:0 0 auto;padding:14px 16px;}
+  .btn.post{background:var(--accent);color:#fff;}
+
+  /* ---------- editor ---------- */
+  #editor{position:absolute;inset:0;z-index:58;background:#050506;display:none;flex-direction:column;}
+  #editor.show{display:flex;}
+  .edstage{flex:1;display:grid;place-items:center;overflow:hidden;padding:14px;
+    padding-top:calc(env(safe-area-inset-top) + 14px);min-height:0;}
+  .edframe{position:relative;max-width:100%;max-height:100%;overflow:hidden;border-radius:10px;
+    background:#000;line-height:0;}
+  #edimg{display:block;max-width:100%;max-height:100%;width:100%;height:100%;object-fit:cover;}
+  .edoverlay{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;}
+  .edtextlayer{position:absolute;inset:0;}
+  .edtext{position:absolute;transform:translate(-50%,-50%);font-weight:800;cursor:grab;
+    text-shadow:0 2px 8px #0009;white-space:nowrap;user-select:none;touch-action:none;padding:4px;}
+  .edtext.sel{outline:1px dashed #ffffff88;}
+  .edtools{background:#0a0a0b;border-top:1px solid var(--line);
+    padding:12px 14px calc(env(safe-area-inset-bottom) + 12px);}
+  .edtabs{display:flex;gap:20px;justify-content:center;margin-bottom:12px;font-size:13px;
+    font-weight:700;letter-spacing:.08em;color:var(--dim);}
+  .edtabs span{cursor:pointer;padding:4px 2px;}
+  .edtabs span.active{color:#fff;box-shadow:inset 0 -2px 0 var(--accent);}
+  .edpanel{min-height:112px;}
+  .slider{display:flex;align-items:center;gap:12px;margin:9px 0;}
+  .slider label{width:88px;font-size:12px;color:var(--dim);}
+  .slider .val{width:34px;text-align:right;font-size:12px;color:#cfcfd4;font-variant-numeric:tabular-nums;}
+  .slider input[type=range]{flex:1;accent-color:var(--accent);height:22px;}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;}
+  .chip{background:#111114;border:1px solid var(--line);color:var(--dim);border-radius:20px;
+    padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+  .chip.sel{border-color:var(--accent);color:#fff;background:#ff3b5c1a;}
+  .txtrow{display:flex;gap:8px;margin-bottom:10px;}
+  .txtrow input{flex:1;background:#111114;border:1px solid var(--line);color:#fff;
+    border-radius:10px;padding:10px 12px;font-size:14px;}
+  .swatches{display:flex;gap:8px;align-items:center;}
+  .sw{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #fff2;}
+  .sw.sel{border-color:#fff;transform:scale(1.12);}
+  .edactions{display:flex;gap:10px;margin-top:12px;}
+  .linkbtn{background:none;border:none;color:var(--dim);font-size:13px;cursor:pointer;text-decoration:underline;}
+
+  /* ---------- feed ---------- */
+  #feed{position:absolute;inset:0;z-index:50;background:var(--bg);display:none;flex-direction:column;}
+  #feed.show{display:flex;}
+  .feedhead{padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg);z-index:2;}
+  .feedhead h1{font-size:16px;margin:0;font-weight:800;letter-spacing:.1em;}
+  .feedscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .empty{padding:60px 32px;text-align:center;color:var(--dim);font-size:14px;line-height:1.6;}
+  .post{border-bottom:1px solid var(--line);}
+  .posthead{display:flex;align-items:center;gap:10px;padding:12px 14px;}
+  .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#ff3b5c,#ff9a3b);}
+  .pname{font-weight:700;font-size:14px;}
+  .ptime{color:var(--dim);font-size:12px;}
+  .verified{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;
+    color:var(--ok);background:#37d67a1a;border:1px solid #37d67a33;padding:4px 9px;border-radius:20px;}
+  .postmedia{width:100%;background:#000;display:block;max-height:70vh;object-fit:contain;}
+  .postcap{padding:10px 14px 14px;font-size:14px;line-height:1.4;}
+  .drafttag{font-size:10px;font-weight:800;letter-spacing:.1em;color:#ffb03b;
+    border:1px solid #ffb03b55;padding:2px 7px;border-radius:6px;margin-left:8px;}
+
+  .tabs{display:flex;border-bottom:1px solid var(--line);}
+  .tab{flex:1;text-align:center;padding:12px;font-size:13px;font-weight:700;color:var(--dim);cursor:pointer;letter-spacing:.06em;}
+  .tab.active{color:#fff;box-shadow:inset 0 -2px 0 var(--accent);}
+  .tag{color:var(--accent);font-weight:600;}
+  .infobtn{background:#ffffff12;border:1px solid var(--line);color:var(--dim);width:30px;height:30px;
+    border-radius:50%;font-size:14px;cursor:pointer;flex:0 0 auto;}
+
+  /* ---------- location toggle ---------- */
+  .locrow{display:flex;align-items:center;gap:10px;background:#111114;border:1px solid var(--line);
+    border-radius:12px;padding:10px 12px;}
+  .loclabel{font-size:14px;color:#fff;display:flex;gap:6px;align-items:center;flex:1;}
+  .locval{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;}
+  .toggle{width:46px;height:28px;border-radius:16px;background:#333;border:none;position:relative;
+    cursor:pointer;transition:background .15s;padding:0;flex:0 0 auto;}
+  .toggle[aria-pressed="true"]{background:var(--ok);}
+  .toggle .knob{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;
+    background:#fff;transition:left .15s;}
+  .toggle[aria-pressed="true"] .knob{left:21px;}
+
+  /* ---------- info sheet ---------- */
+  #infosheet{position:absolute;inset:0;z-index:70;background:#000a;display:none;align-items:flex-end;
+    backdrop-filter:blur(2px);}
+  #infosheet.show{display:flex;}
+  .infocard{background:#0c0c0e;border-top-left-radius:20px;border-top-right-radius:20px;width:100%;
+    max-height:86%;overflow-y:auto;padding:20px 18px calc(env(safe-area-inset-bottom) + 18px);
+    border-top:1px solid var(--line);}
+  .infocard h3{margin:0 0 10px;font-size:17px;}
+  .infobadge{display:inline-flex;gap:6px;align-items:center;color:var(--ok);background:#37d67a1a;
+    border:1px solid #37d67a33;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:14px;}
+  .inforow{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;}
+  .inforow .k{color:var(--dim);flex:0 0 auto;}
+  .inforow .v{color:#eee;text-align:right;word-break:break-word;}
+  .infomono{font-family:ui-monospace,Menlo,monospace;font-size:11px;}
+  .infoorig{margin-top:14px;}
+  .infoorig img{width:100%;border-radius:10px;display:block;margin-top:8px;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ CAMERA ============ -->
+  <div id="camera">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="pip" class="pip"><video id="videoPip" autoplay playsinline muted></video></div>
+    <div id="flash"></div>
+    <div class="permwarn" id="permwarn">
+      <h2>Camera needed</h2>
+      <p id="permtext">This app has no upload button — by design. Allow camera access to capture something live.</p>
+      <button class="btn post" style="max-width:220px" onclick="initCamera()">Enable camera</button>
+    </div>
+  </div>
+
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>LIVE</div>
+    <button class="iconbtn" id="flipbtn" title="Switch camera" style="width:auto;padding:0 14px;gap:6px;font-size:13px;font-weight:800;letter-spacing:.08em;">⟳ <span id="camlabel">BACK</span></button>
+  </div>
+
+  <div class="segbar" id="segbar"></div>
+
+  <div class="controls" id="controls">
+    <div class="hint" id="hint">Tap for photo · hold for video</div>
+    <div class="row">
+      <div class="side">
+        <div class="thumbbtn" id="openfeed">FEED</div>
+      </div>
+      <button class="shutter" id="shutter" aria-label="Capture"><div class="core"></div></button>
+      <div class="side">
+        <button class="donebtn" id="donebtn">Next ✓</button>
+      </div>
+    </div>
+    <div class="modes">
+      <span data-mode="photo" class="active">PHOTO</span>
+      <span data-mode="video">VIDEO</span>
+    </div>
+  </div>
+
+  <!-- ============ REVIEW ============ -->
+  <div class="review" id="review">
+    <div class="media" id="reviewmedia"></div>
+    <div class="receipt" id="receipt"></div>
+    <div class="foot">
+      <textarea class="capinput" id="caption" rows="2" placeholder="Write a caption… #hashtags and @mentions welcome"></textarea>
+      <div class="locrow">
+        <div class="loclabel">📍 <span>Attach location</span></div>
+        <span class="locval" id="locval">Off</span>
+        <button class="toggle" id="loctoggle" aria-pressed="false"><span class="knob"></span></button>
+      </div>
+      <div class="audience" id="audience">
+        <div class="aud sel" data-aud="public"><span class="ic">🌐</span><span class="lb">Public</span></div>
+        <div class="aud" data-aud="connections"><span class="ic">👥</span><span class="lb">Connections</span></div>
+        <div class="aud" data-aud="private"><span class="ic">🔒</span><span class="lb">Private</span></div>
+      </div>
+      <div class="revbtns">
+        <button class="btn ghost" id="editback">← Edit</button>
+        <button class="btn draft" id="savedraft">Draft</button>
+        <button class="btn post" id="postbtn">Post live →</button>
+      </div>
+      <button class="linkbtn" id="discard" style="align-self:center;margin-top:2px;">Discard</button>
+    </div>
+  </div>
+
+  <!-- ============ EDITOR (photos) ============ -->
+  <div id="editor">
+    <div class="edstage">
+      <div class="edframe" id="edframe">
+        <img id="edimg" alt="">
+        <div class="edoverlay" id="edoverlay"></div>
+        <div class="edtextlayer" id="edtextlayer"></div>
+      </div>
+    </div>
+    <div class="edtools">
+      <div class="edtabs">
+        <span data-t="adjust" class="active">ADJUST</span>
+        <span data-t="crop">CROP</span>
+        <span data-t="text">TEXT</span>
+      </div>
+
+      <div class="edpanel" id="panel-adjust">
+        <div class="chips" id="adjpresets" style="margin-bottom:12px;overflow-x:auto;flex-wrap:nowrap;">
+          <span class="chip sel" data-preset="none">Original</span>
+          <span class="chip" data-preset="auto">Auto</span>
+          <span class="chip" data-preset="sunrise">Sunrise</span>
+          <span class="chip" data-preset="sunset">Sunset</span>
+          <span class="chip" data-preset="city">City</span>
+          <span class="chip" data-preset="country">Country</span>
+          <span class="chip" data-preset="vivid">Vivid</span>
+          <span class="chip" data-preset="noir">Noir</span>
+        </div>
+        <div class="slider"><label>Brightness</label><input type="range" min="-100" max="100" value="0" data-adj="brightness"><span class="val">0</span></div>
+        <div class="slider"><label>Contrast</label><input type="range" min="-100" max="100" value="0" data-adj="contrast"><span class="val">0</span></div>
+        <div class="slider"><label>Saturation</label><input type="range" min="-100" max="100" value="0" data-adj="saturation"><span class="val">0</span></div>
+        <div class="slider"><label>Warmth</label><input type="range" min="-100" max="100" value="0" data-adj="warmth"><span class="val">0</span></div>
+        <div class="slider"><label>Tint</label><input type="range" min="-100" max="100" value="0" data-adj="tint"><span class="val">0</span></div>
+        <button class="linkbtn" id="edreset">Reset adjustments</button>
+      </div>
+
+      <div class="edpanel" id="panel-crop" hidden>
+        <div class="chips" id="cropchips">
+          <span class="chip sel" data-ar="0">Original</span>
+          <span class="chip" data-ar="1">Square 1:1</span>
+          <span class="chip" data-ar="0.8">Portrait 4:5</span>
+          <span class="chip" data-ar="1.7778">Wide 16:9</span>
+        </div>
+      </div>
+
+      <div class="edpanel" id="panel-text" hidden>
+        <div class="txtrow">
+          <input id="txtinput" placeholder="Type text to add…" maxlength="60">
+          <button class="chip" id="addtext">Add</button>
+        </div>
+        <div class="swatches" id="swatches"></div>
+      </div>
+
+      <div class="edactions">
+        <button class="btn ghost" id="edcancel">Cancel</button>
+        <button class="btn post" id="ednext">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FEED ============ -->
+  <div id="feed">
+    <div class="feedhead">
+      <h1>LIVE</h1>
+      <button class="iconbtn" id="closefeed">✕</button>
+    </div>
+    <div class="tabs">
+      <div class="tab active" data-tab="feed">FEED</div>
+      <div class="tab" data-tab="drafts">DRAFTS</div>
+    </div>
+    <div class="feedscroll" id="feedscroll"></div>
+  </div>
+
+  <!-- ============ INFO SHEET (provenance) ============ -->
+  <div id="infosheet"><div class="infocard" id="infocard"></div></div>
+
+</div>
+
+<script>
+/* =========================================================================
+   LIVE — a capture-only camera. No file input exists anywhere in this app.
+   The only way media enters the feed is the live camera below.
+   ========================================================================= */
+
+const $ = s => document.querySelector(s);
+const video = $('#video');
+const videoPip = $('#videoPip');
+let stream = null;          // main camera stream (has audio)
+let pipStream = null;       // secondary camera stream (both mode)
+let camMode = 'back';       // 'back' | 'front' | 'both'
+let bothActive = false;     // true when a real second stream is running
+let mode = 'photo';
+let mediaRecorder = null, recChunks = [], segDurations = [], recStart = 0, segEls = [];
+let recording = false, rafId = null;
+const MAX_MS = 60000; // hard ceiling — short-form by design
+let pending = null; // {type, blob, url, receipt, original}
+
+/* ---------- camera ---------- */
+function stopStreams(){
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  if(pipStream){ pipStream.getTracks().forEach(t=>t.stop()); pipStream=null; }
+  bothActive=false;
+}
+async function getCam(facingMode, withAudio){
+  return navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:{ideal:facingMode}, width:{ideal:1920}, height:{ideal:1080} },
+    audio: withAudio
+  });
+}
+async function initCamera(){
+  $('#permwarn').style.display='none';
+  const wantMain = camMode==='front' ? 'user' : 'environment';
+  try{
+    stopStreams();
+    stream = await getCam(wantMain, true);
+    video.srcObject = stream;
+    video.classList.toggle('mirror', wantMain==='user');
+    $('#pip').classList.remove('show');
+
+    if(camMode==='both'){
+      // main = back, pip = front. Try a second simultaneous stream.
+      try{
+        pipStream = await getCam('user', false);
+        videoPip.srcObject = pipStream;
+        videoPip.classList.add('mirror');
+        $('#pip').classList.add('show');
+        bothActive=true;
+      }catch(e){
+        // iOS Safari & some devices block dual streams — fall back to single.
+        bothActive=false;
+        $('#hint').textContent = 'This device can’t run two cameras at once — showing back only.';
+        setHintSoon();
+      }
+    }
+    updateCamLabel();
+  }catch(err){
+    const pw=$('#permwarn'); pw.style.display='flex';
+    $('#permtext').textContent =
+      location.protocol==='https:'||location.hostname==='localhost'
+      ? 'Camera was blocked ('+err.name+'). Check the browser’s camera permission and try again.'
+      : 'The camera only works over https or on localhost. Serve this over https to use it on your phone.';
+  }
+}
+function updateCamLabel(){ $('#camlabel').textContent = camMode.toUpperCase(); }
+$('#flipbtn').onclick = ()=>{
+  if(recording) return;
+  camMode = camMode==='back' ? 'front' : camMode==='front' ? 'both' : 'back';
+  initCamera();
+};
+
+/* ---------- mode switch ---------- */
+document.querySelectorAll('.modes span').forEach(el=>{
+  el.onclick=()=>{
+    if(recording) return;
+    mode = el.dataset.mode;
+    document.querySelectorAll('.modes span').forEach(s=>s.classList.toggle('active',s===el));
+    $('#shutter').classList.toggle('video', mode==='video');
+    $('#hint').textContent = defaultHint();
+  };
+});
+
+/* ---------- hint helpers ---------- */
+function defaultHint(){ return mode==='photo' ? 'Tap for photo · hold for video' : 'Press & HOLD to record · release to pause'; }
+function setHintSoon(){ setTimeout(()=>{ if(!recording) $('#hint').textContent = defaultHint(); }, 2000); }
+
+/* ---------- composite (both mode: draw main + PiP inset) ---------- */
+function drawComposite(ctx, W, H){
+  // main
+  if(camMode==='front'){ ctx.save(); ctx.translate(W,0); ctx.scale(-1,1); ctx.drawImage(video,0,0,W,H); ctx.restore(); }
+  else ctx.drawImage(video,0,0,W,H);
+  // pip inset (front cam), top-right, mirrored — mirrors the on-screen layout
+  if(bothActive && videoPip.videoWidth){
+    const pw=Math.round(W*0.26), ph=Math.round(pw*(150/104)), pad=Math.round(W*0.03);
+    const x=W-pw-pad, y=pad;
+    ctx.save();
+    ctx.beginPath(); const r=Math.round(pw*0.12);
+    ctx.roundRect(x,y,pw,ph,r); ctx.clip();
+    ctx.translate(x+pw,y); ctx.scale(-1,1);
+    ctx.drawImage(videoPip,0,0,pw,ph);
+    ctx.restore();
+    ctx.save(); ctx.strokeStyle='#ffffffcc'; ctx.lineWidth=Math.max(2,W*0.004);
+    ctx.beginPath(); ctx.roundRect(x,y,pw,ph,r); ctx.stroke(); ctx.restore();
+  }
+}
+
+/* ---------- capture receipt (the "provenance" idea, made visible) ---------- */
+async function makeReceipt(blob, type){
+  const buf = await blob.arrayBuffer();
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  const hash = [...new Uint8Array(hashBuf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  return {
+    type, capturedAt: new Date().toISOString(),
+    device: navigator.platform || 'device',
+    camera: (camMode==='both' && bothActive) ? 'front + back' : camMode,
+    sizeKB: Math.round(blob.size/1024),
+    liveCapture: true,
+    hash
+  };
+}
+
+/* ---------- PHOTO ---------- */
+async function takePhoto(){
+  if(!stream) { initCamera(); return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth||1280; canvas.height = video.videoHeight||720;
+  const ctx = canvas.getContext('2d');
+  drawComposite(ctx, canvas.width, canvas.height);
+  // flash
+  const f=$('#flash'); f.style.transition='none'; f.style.opacity='.9';
+  requestAnimationFrame(()=>{ f.style.transition='opacity .4s'; f.style.opacity='0'; });
+  canvas.toBlob(async blob=>{
+    const receipt = await makeReceipt(blob,'photo');   // hash of the ORIGINAL camera frame
+    openEditor(blob, receipt);
+  },'image/jpeg',0.92);
+}
+
+/* ---------- VIDEO (Vine-style press & hold, stitched) ---------- */
+function pickMime(){
+  const c=['video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  for(const m of c){ if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; }
+  return '';
+}
+let compCanvas=null, compRaf=null, recStream=null;
+function startCompositeLoop(){
+  compCanvas = document.createElement('canvas');
+  compCanvas.width = video.videoWidth||1280; compCanvas.height = video.videoHeight||720;
+  const ctx = compCanvas.getContext('2d');
+  const loop = ()=>{ drawComposite(ctx, compCanvas.width, compCanvas.height); compRaf=requestAnimationFrame(loop); };
+  loop();
+  const cs = compCanvas.captureStream(30);
+  const audio = stream.getAudioTracks();
+  recStream = new MediaStream([...cs.getVideoTracks(), ...audio]);
+}
+function stopCompositeLoop(){ if(compRaf) cancelAnimationFrame(compRaf); compRaf=null; compCanvas=null; recStream=null; }
+function startRecorder(){
+  recChunks=[]; segDurations=[]; segEls=[];
+  $('#segbar').classList.add('show'); $('#segbar').innerHTML='';
+  const useComposite = (camMode==='both' && bothActive);
+  if(useComposite) startCompositeLoop();
+  const src = useComposite ? recStream : stream;
+  const mime = pickMime();
+  mediaRecorder = new MediaRecorder(src, mime?{mimeType:mime}:undefined);
+  mediaRecorder.ondataavailable = e=>{ if(e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = finalizeVideo;
+}
+function beginSegment(){
+  if(!stream) return;
+  if(!mediaRecorder || mediaRecorder.state==='inactive') startRecorder();
+  if(totalMs()>=MAX_MS) return;
+  recording=true; recStart=performance.now();
+  $('#shutter').classList.add('recording');
+  const live=document.createElement('div'); live.className='seg live'; $('#segbar').appendChild(live); segEls.push(live);
+  if(mediaRecorder.state==='inactive') mediaRecorder.start();
+  else if(mediaRecorder.state==='paused') mediaRecorder.resume();
+  tick();
+}
+function endSegment(){
+  if(!recording) return;
+  recording=false; cancelAnimationFrame(rafId);
+  const dur=performance.now()-recStart; segDurations.push(dur);
+  const el=segEls[segEls.length-1]; el.classList.remove('live');
+  $('#shutter').classList.remove('recording');
+  if(mediaRecorder && mediaRecorder.state==='recording') mediaRecorder.pause();
+  layoutSegs();
+  $('#donebtn').classList.toggle('show', segDurations.length>0);
+  if(totalMs()>=MAX_MS) finishRecording();
+}
+function totalMs(){ return segDurations.reduce((a,b)=>a+b,0) + (recording?performance.now()-recStart:0); }
+function layoutSegs(){
+  const all=[...segDurations]; if(recording) all.push(performance.now()-recStart);
+  segEls.forEach((el,i)=>{ el.style.flex = `0 0 ${Math.min(100,(all[i]/MAX_MS)*100)}%`; });
+}
+function tick(){ layoutSegs(); if(totalMs()>=MAX_MS){ endSegment(); return; } rafId=requestAnimationFrame(tick); }
+function finishRecording(){
+  $('#donebtn').classList.remove('show');
+  $('#segbar').classList.remove('show');
+  if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop();
+}
+async function finalizeVideo(){
+  const blob = new Blob(recChunks, {type: recChunks[0]?.type || 'video/webm'});
+  mediaRecorder=null; stopCompositeLoop();
+  if(!blob.size) return;
+  const receipt = await makeReceipt(blob,'video');
+  receipt.segments = segDurations.length;
+  openReview({type:'video', blob, url:URL.createObjectURL(blob), receipt});
+}
+
+/* ---------- shutter input (tap vs hold) ---------- */
+const shutter=$('#shutter'); let holdTimer=null, held=false;
+shutter.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(!stream){ initCamera(); return; }
+  if(mode==='photo'){ return; }
+  held=true; beginSegment();
+});
+window.addEventListener('pointerup', ()=>{ if(mode==='video' && held){ held=false; endSegment(); } });
+shutter.addEventListener('click', ()=>{ if(mode==='photo') takePhoto(); });
+$('#donebtn').onclick = finishRecording;
+
+/* =========================================================================
+   EDITOR — darkroom, not deepfake. Adjust light/colour, crop, add text.
+   The original camera hash is preserved; every adjustment is logged on the
+   receipt so the tweaks are transparent.
+   ========================================================================= */
+const TEXT_COLORS = ['#ffffff','#050506','#ff3b5c','#ffd23b','#37d67a','#4aa8ff'];
+const PRESETS = {
+  none:   {brightness:0,  contrast:0,  saturation:0,   warmth:0,  tint:0},
+  auto:   {brightness:8,  contrast:12, saturation:8,   warmth:5,  tint:0},
+  sunrise:{brightness:10, contrast:6,  saturation:14,  warmth:30, tint:8},
+  sunset: {brightness:4,  contrast:12, saturation:20,  warmth:45, tint:-6},
+  city:   {brightness:-2, contrast:24, saturation:-8,  warmth:-12,tint:0},
+  country:{brightness:6,  contrast:10, saturation:22,  warmth:12, tint:-4},
+  vivid:  {brightness:4,  contrast:18, saturation:38,  warmth:4,  tint:0},
+  noir:   {brightness:2,  contrast:28, saturation:-100,warmth:0,  tint:0},
+};
+let edImg=new Image(), edRawBlob=null, edOrigReceipt=null, edState=null, edTextColor='#ffffff', edSelText=null, edPreset='none';
+
+function freshEdState(){ return { brightness:0,contrast:0,saturation:0,warmth:0,tint:0, ar:0, texts:[] }; }
+function syncAdjustSliders(){
+  document.querySelectorAll('#panel-adjust input[type=range]').forEach(r=>{ r.value=edState[r.dataset.adj]; r.parentElement.querySelector('.val').textContent=r.value; });
+}
+function markPreset(name){ edPreset=name; document.querySelectorAll('#adjpresets .chip').forEach(c=>c.classList.toggle('sel',c.dataset.preset===name)); }
+function applyPreset(name){
+  const p=PRESETS[name]||PRESETS.none;
+  Object.assign(edState, p);
+  markPreset(name); syncAdjustSliders(); applyLivePreview();
+}
+document.querySelectorAll('#adjpresets .chip').forEach(c=> c.onclick=()=>applyPreset(c.dataset.preset));
+
+function openEditor(rawBlob, origReceipt){
+  edOrigReceipt = origReceipt;
+  edRawBlob = rawBlob;
+  edState = freshEdState();
+  edSelText=null;
+  const url = URL.createObjectURL(rawBlob);
+  edImg = new Image();
+  edImg.onload = ()=>{ applyLivePreview(); renderTexts(); };
+  edImg.src = url;
+  $('#edimg').src = url;
+  syncAdjustSliders();
+  markPreset('none');
+  document.querySelectorAll('#cropchips .chip').forEach(c=>c.classList.toggle('sel', c.dataset.ar==='0'));
+  edApplyCrop(0);
+  switchEdTab('adjust');
+  $('#editor').classList.add('show');
+}
+
+/* reopen editor WITHOUT resetting — used by the review "← Edit" back button */
+function reopenEditor(){
+  syncAdjustSliders();
+  markPreset(edPreset);
+  document.querySelectorAll('#cropchips .chip').forEach(c=>c.classList.toggle('sel', +c.dataset.ar===edState.ar));
+  edApplyCrop(edState.ar);
+  applyLivePreview(); renderTexts();
+  switchEdTab('adjust');
+  $('#editor').classList.add('show');
+}
+
+/* ---- live preview via CSS ---- */
+function cssFilterString(s){
+  return `brightness(${1+s.brightness/100}) contrast(${1+s.contrast/100}) saturate(${1+s.saturation/100})`;
+}
+function overlayStyle(s){
+  // warmth: + warm(orange) / - cool(blue).  tint: + magenta / - green.
+  const layers=[];
+  if(s.warmth>0) layers.push(`rgba(255,147,41,${(s.warmth/100)*0.5})`);
+  else if(s.warmth<0) layers.push(`rgba(41,120,255,${(-s.warmth/100)*0.5})`);
+  if(s.tint>0) layers.push(`rgba(255,0,200,${(s.tint/100)*0.4})`);
+  else if(s.tint<0) layers.push(`rgba(60,255,90,${(-s.tint/100)*0.4})`);
+  return layers;
+}
+function applyLivePreview(){
+  $('#edimg').style.filter = cssFilterString(edState);
+  const ov=$('#edoverlay'); const layers=overlayStyle(edState);
+  ov.style.background = layers.length ? layers.map(c=>`linear-gradient(${c},${c})`).join(',') : 'transparent';
+}
+function edApplyCrop(ar){
+  edState.ar = ar;
+  const f=$('#edframe');
+  if(!edImg.naturalWidth){ f.style.aspectRatio=''; return; }
+  const natural = edImg.naturalWidth/edImg.naturalHeight;
+  f.style.aspectRatio = ar>0 ? String(ar) : String(natural);
+}
+
+/* ---- tabs ---- */
+function switchEdTab(t){
+  document.querySelectorAll('.edtabs span').forEach(s=>s.classList.toggle('active',s.dataset.t===t));
+  ['adjust','crop','text'].forEach(p=>$('#panel-'+p).hidden = (p!==t));
+}
+document.querySelectorAll('.edtabs span').forEach(s=> s.onclick=()=>switchEdTab(s.dataset.t));
+
+/* ---- adjust sliders ---- */
+document.querySelectorAll('#panel-adjust input[type=range]').forEach(r=>{
+  r.oninput=()=>{ edState[r.dataset.adj]=+r.value; r.parentElement.querySelector('.val').textContent=r.value;
+    markPreset('custom'); applyLivePreview(); };
+});
+$('#edreset').onclick=()=> applyPreset('none');
+
+/* ---- crop chips ---- */
+document.querySelectorAll('#cropchips .chip').forEach(c=>{
+  c.onclick=()=>{ document.querySelectorAll('#cropchips .chip').forEach(x=>x.classList.remove('sel')); c.classList.add('sel'); edApplyCrop(+c.dataset.ar); };
+});
+
+/* ---- text tool ---- */
+(function initSwatches(){
+  const wrap=$('#swatches');
+  TEXT_COLORS.forEach((col,i)=>{ const s=document.createElement('div'); s.className='sw'+(i===0?' sel':''); s.style.background=col;
+    s.onclick=()=>{ edTextColor=col; document.querySelectorAll('#swatches .sw').forEach(x=>x.classList.remove('sel')); s.classList.add('sel');
+      if(edSelText){ edSelText.color=col; renderTexts(); } };
+    wrap.appendChild(s); });
+})();
+$('#addtext').onclick=()=>{
+  const v=$('#txtinput').value.trim(); if(!v) return;
+  edState.texts.push({ text:v, x:0.5, y:0.5, color:edTextColor, size:0.09 });
+  $('#txtinput').value=''; renderTexts();
+};
+function renderTexts(){
+  const layer=$('#edtextlayer'); layer.innerHTML='';
+  const fw=$('#edframe').clientWidth||300;
+  edState.texts.forEach((t,i)=>{
+    const el=document.createElement('div'); el.className='edtext'+(edSelText===t?' sel':'');
+    el.textContent=t.text; el.style.left=(t.x*100)+'%'; el.style.top=(t.y*100)+'%';
+    el.style.color=t.color; el.style.fontSize=(t.size*fw)+'px';
+    el.onpointerdown=e=>{ e.preventDefault(); edSelText=t; renderTexts(); startDragText(e,t); };
+    layer.appendChild(el);
+  });
+}
+function startDragText(e,t){
+  const frame=$('#edframe'); const rect=frame.getBoundingClientRect();
+  const move=ev=>{ t.x=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));
+                   t.y=Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height)); renderTexts(); };
+  const up=()=>{ window.removeEventListener('pointermove',move); window.removeEventListener('pointerup',up); };
+  window.addEventListener('pointermove',move); window.addEventListener('pointerup',up);
+}
+
+/* ---- bake edits into a new blob ---- */
+function listEdits(){
+  const e=[];
+  if(edPreset && edPreset!=='none' && edPreset!=='custom') e.push('preset: '+edPreset);
+  ['brightness','contrast','saturation','warmth','tint'].forEach(k=>{ if(edState[k]) e.push(`${k} ${edState[k]>0?'+':''}${edState[k]}`); });
+  if(edState.ar>0){ const names={'1':'1:1','0.8':'4:5','1.7778':'16:9'}; e.push('crop '+(names[String(edState.ar)]||edState.ar)); }
+  if(edState.texts.length) e.push(`${edState.texts.length} text overlay${edState.texts.length>1?'s':''}`);
+  return e;
+}
+function bakeEdits(){
+  return new Promise(res=>{
+    const iw=edImg.naturalWidth, ih=edImg.naturalHeight;
+    // center-crop source rect to target aspect
+    let sw=iw, sh=ih, sx=0, sy=0;
+    if(edState.ar>0){ const target=edState.ar, cur=iw/ih;
+      if(cur>target){ sw=Math.round(ih*target); sx=Math.round((iw-sw)/2); }
+      else{ sh=Math.round(iw/target); sy=Math.round((ih-sh)/2); } }
+    const canvas=document.createElement('canvas'); canvas.width=sw; canvas.height=sh;
+    const ctx=canvas.getContext('2d');
+    ctx.filter=cssFilterString(edState);
+    ctx.drawImage(edImg, sx,sy,sw,sh, 0,0,sw,sh);
+    ctx.filter='none';
+    // warmth/tint overlay to match preview
+    ctx.globalCompositeOperation='soft-light';
+    overlayStyle(edState).forEach(c=>{ ctx.fillStyle=c; ctx.fillRect(0,0,sw,sh); });
+    ctx.globalCompositeOperation='source-over';
+    // text
+    edState.texts.forEach(t=>{
+      ctx.font=`800 ${t.size*sw}px -apple-system,Helvetica,Arial,sans-serif`;
+      ctx.fillStyle=t.color; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=t.size*sw*0.25; ctx.shadowOffsetY=t.size*sw*0.06;
+      ctx.fillText(t.text, t.x*sw, t.y*sh);
+      ctx.shadowColor='transparent';
+    });
+    canvas.toBlob(b=>res(b),'image/jpeg',0.92);
+  });
+}
+$('#edcancel').onclick=()=>{ $('#editor').classList.remove('show'); };
+$('#ednext').onclick=async()=>{
+  const blob=await bakeEdits();
+  const edits=listEdits();
+  const wasEdited = edits.length>0;
+  const receipt = { ...edOrigReceipt, type:'photo', sizeKB:Math.round(blob.size/1024),
+                    originalHash: edOrigReceipt.hash, edits: wasEdited?edits:['none — original camera frame'] };
+  // re-hash the edited result so the receipt reflects what's actually posted
+  const buf=await blob.arrayBuffer();
+  const hb=await crypto.subtle.digest('SHA-256',buf);
+  receipt.hash=[...new Uint8Array(hb)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  $('#editor').classList.remove('show');
+  // keep the untouched original around so it can always be viewed (only if actually edited)
+  openReview({type:'photo', blob, url:URL.createObjectURL(blob), receipt, original: wasEdited?edRawBlob:null});
+};
+
+/* ---------- review ---------- */
+let stashReview=null; // preserves caption/audience/location when going back to edit
+function openReview(p){
+  pending=p;
+  const m=$('#reviewmedia'); m.innerHTML='';
+  if(p.type==='photo'){ const img=new Image(); img.src=p.url; m.appendChild(img); }
+  else{ const v=document.createElement('video'); v.src=p.url; v.controls=true; v.loop=true; v.autoplay=true; v.playsInline=true; m.appendChild(v); }
+  const r=p.receipt;
+  $('#receipt').innerHTML =
+    `<b>✓ Captured live in-app</b> · ${new Date(r.capturedAt).toLocaleString()}<br>`+
+    `${r.type} · ${r.camera} cam${r.segments?` · ${r.segments} segment${r.segments>1?'s':''} stitched`:''} · ${r.sizeKB} KB<br>`+
+    (r.edits?`darkroom: ${r.edits.join(', ')}<br>`:'')+
+    `<span class="mono">sha256: ${r.hash.slice(0,32)}…</span>`+
+    (r.originalHash&&r.originalHash!==r.hash?`<br><span class="mono" style="opacity:.7">orig: ${r.originalHash.slice(0,24)}…</span>`:'');
+  $('#editback').style.display = p.type==='photo' ? '' : 'none';   // only photos have an editor
+  if(stashReview){
+    $('#caption').value=stashReview.caption; setAudience(stashReview.audience); setLocationUI(stashReview.location);
+    stashReview=null;
+  }else{
+    $('#caption').value=''; setAudience('public'); setLocationUI(null);
+  }
+  $('#review').classList.add('show');
+}
+$('#editback').onclick = ()=>{
+  stashReview = { caption:$('#caption').value, audience, location:pendingLocation };
+  $('#review').classList.remove('show');
+  reopenEditor();
+};
+
+/* ---------- audience selector ---------- */
+let audience='public';
+function setAudience(a){ audience=a; document.querySelectorAll('.aud').forEach(el=>el.classList.toggle('sel',el.dataset.aud===a)); }
+document.querySelectorAll('.aud').forEach(el=> el.onclick=()=>setAudience(el.dataset.aud));
+const AUD = { public:{ic:'🌐',label:'Public'}, connections:{ic:'👥',label:'Connections'}, private:{ic:'🔒',label:'Private'} };
+
+/* ---------- location (opt-in, visible by design) ---------- */
+let pendingLocation=null;
+function setLocationUI(loc){
+  pendingLocation=loc;
+  const t=$('#loctoggle');
+  t.setAttribute('aria-pressed', loc?'true':'false');
+  $('#locval').textContent = loc ? `${loc.lat}, ${loc.lon}` : 'Off';
+}
+$('#loctoggle').onclick = async ()=>{
+  if(pendingLocation){ setLocationUI(null); return; }
+  if(!navigator.geolocation){ $('#locval').textContent='Unavailable'; return; }
+  $('#locval').textContent='Locating…';
+  try{
+    const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:false,timeout:8000}));
+    setLocationUI({ lat:+pos.coords.latitude.toFixed(4), lon:+pos.coords.longitude.toFixed(4), acc:Math.round(pos.coords.accuracy) });
+  }catch(e){ setLocationUI(null); $('#locval').textContent = e.code===1?'Denied':'Unavailable'; }
+};
+
+$('#discard').onclick = ()=>{ if(pending) URL.revokeObjectURL(pending.url); pending=null; stashReview=null; $('#review').classList.remove('show'); };
+$('#postbtn').onclick = ()=> commit(false);
+$('#savedraft').onclick = ()=> commit(true);
+
+/* ---------- storage (IndexedDB) ---------- */
+let db;
+const openDB = ()=> new Promise(res=>{
+  const rq=indexedDB.open('live-cam',1);
+  rq.onupgradeneeded=()=>rq.result.createObjectStore('posts',{keyPath:'id'});
+  rq.onsuccess=()=>{ db=rq.result; res(); };
+});
+function savePost(post){ return new Promise(res=>{ const tx=db.transaction('posts','readwrite'); tx.objectStore('posts').put(post); tx.oncomplete=res; }); }
+function allPosts(){ return new Promise(res=>{ const tx=db.transaction('posts','readonly'); const rq=tx.objectStore('posts').getAll(); rq.onsuccess=()=>res(rq.result.sort((a,b)=>b.id-a.id)); }); }
+
+function parseTags(s){ return [...new Set((s.match(/#[\w]+/g)||[]).map(t=>t.toLowerCase()))]; }
+async function commit(isDraft){
+  if(!pending) return;
+  const caption = $('#caption').value.trim();
+  const post = {
+    id: Date.now(), type: pending.type, blob: pending.blob,
+    caption, tags: parseTags(caption), receipt: pending.receipt, draft: isDraft,
+    audience, location: pendingLocation, originalBlob: pending.original || null
+  };
+  await savePost(post);
+  pending=null; pendingLocation=null;
+  $('#review').classList.remove('show');
+  $('#hint').textContent = isDraft ? 'Saved to drafts ✓' : 'Posted ✓';
+  setTimeout(()=>{ $('#hint').textContent = defaultHint(); },1600);
+  openFeed(isDraft?'drafts':'feed');
+}
+
+/* ---------- feed rendering ---------- */
+let curTab='feed';
+function timeAgo(id){ const s=(Date.now()-id)/1000;
+  if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+const renderedById = new Map();
+async function renderFeed(){
+  const posts=(await allPosts()).filter(p=> curTab==='drafts'? p.draft : !p.draft );
+  const box=$('#feedscroll');
+  renderedById.clear();
+  if(!posts.length){ box.innerHTML=`<div class="empty">${curTab==='drafts'?'No drafts yet.<br>Capture something and tap <b>Draft</b> to post it later.':'Nothing here yet.<br>Everything in this feed was captured live — there’s no other way in.'}</div>`; return; }
+  box.innerHTML='';
+  for(const p of posts){
+    renderedById.set(p.id, p);
+    const url=URL.createObjectURL(p.blob);
+    const el=document.createElement('div'); el.className='post';
+    const media = p.type==='photo'
+      ? `<img class="postmedia" src="${url}">`
+      : `<video class="postmedia" src="${url}" controls loop playsinline></video>`;
+    const aud=AUD[p.audience]||AUD.public;
+    el.innerHTML=`
+      <div class="posthead">
+        <div class="avatar"></div>
+        <div style="flex:1">
+          <div class="pname">you ${p.draft?'<span class="drafttag">DRAFT</span>':''}</div>
+          <div class="ptime">${timeAgo(p.id)} · ${aud.ic} ${aud.label}${p.location?' · 📍':''}</div>
+        </div>
+        <div class="verified">✓ live</div>
+        <button class="infobtn" data-info="${p.id}" aria-label="Post details">ⓘ</button>
+      </div>
+      ${media}
+      ${p.caption?`<div class="postcap">${renderCaption(p.caption)}</div>`:''}`;
+    box.appendChild(el);
+  }
+}
+function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function renderCaption(s){ return escapeHtml(s).replace(/(#[\w]+|@[\w]+)/g,'<span class="tag">$1</span>'); }
+
+/* ---------- info sheet (the receipt, surfaced) ---------- */
+function openInfo(p){
+  if(!p) return;
+  const r=p.receipt||{};
+  const rows=[
+    ['Captured', new Date(r.capturedAt||p.id).toLocaleString()],
+    ['Type', r.type||p.type],
+  ];
+  if(r.camera) rows.push(['Camera', r.camera]);
+  if(r.segments) rows.push(['Segments', r.segments+' stitched']);
+  rows.push(['Audience', (AUD[p.audience]||AUD.public).label]);
+  if(p.location) rows.push(['Location', `${p.location.lat}, ${p.location.lon} (±${p.location.acc}m)`]);
+  rows.push(['Edits', (r.edits&&r.edits.length)?r.edits.join(', '):'none — original camera frame']);
+  if(r.device) rows.push(['Device', r.device]);
+  if(r.sizeKB) rows.push(['Size', r.sizeKB+' KB']);
+  let html = `<h3>Post details</h3><div class="infobadge">✓ Captured live in-app — no upload</div>`;
+  html += rows.map(([k,v])=>`<div class="inforow"><span class="k">${k}</span><span class="v">${escapeHtml(String(v))}</span></div>`).join('');
+  if(r.hash) html += `<div class="inforow"><span class="k">Hash</span><span class="v infomono">${r.hash}</span></div>`;
+  if(r.originalHash && r.originalHash!==r.hash) html += `<div class="inforow"><span class="k">Original hash</span><span class="v infomono">${r.originalHash}</span></div>`;
+  if(p.originalBlob) html += `<div class="infoorig"><button class="chip" id="vieworig">See the original camera frame (before edits)</button><div id="origwrap"></div></div>`;
+  html += `<button class="btn ghost" id="infoclose" style="margin-top:16px;width:100%;">Close</button>`;
+  $('#infocard').innerHTML = html;
+  $('#infoclose').onclick=closeInfo;
+  const vo=$('#vieworig');
+  if(vo) vo.onclick=()=>{ $('#origwrap').innerHTML=`<img src="${URL.createObjectURL(p.originalBlob)}">`; vo.style.display='none'; };
+  $('#infosheet').classList.add('show');
+}
+function closeInfo(){ $('#infosheet').classList.remove('show'); }
+$('#feedscroll').addEventListener('click', e=>{ const b=e.target.closest('[data-info]'); if(b) openInfo(renderedById.get(+b.dataset.info)); });
+$('#infosheet').addEventListener('click', e=>{ if(e.target.id==='infosheet') closeInfo(); });
+
+function openFeed(tab){ curTab=tab||curTab; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===curTab)); $('#feed').classList.add('show'); renderFeed(); }
+$('#openfeed').onclick=()=>openFeed('feed');
+$('#closefeed').onclick=()=>$('#feed').classList.remove('show');
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>openFeed(t.dataset.tab));
+
+/* ---------- boot ---------- */
+(async()=>{ await openDB(); initCamera(); })();
+</script>
+</body>
+</html>
